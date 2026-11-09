@@ -82,6 +82,12 @@ Replace the example URL with your own. Webpage support depends on yt-dlp's
 ability to download that link. A video link containing a playlist downloads
 only that video; standalone playlists are not supported.
 
+When yt-dlp is needed and you leave out `-o`, the output folder uses the
+content title. For example, a video titled `My favorite episode` creates
+`My favorite episode_chunks/`. Characters that cannot safely appear in
+filenames are replaced, and long titles are shortened. An explicit `-o`
+always takes precedence.
+
 **Use a filename containing spaces:**
 
 ```sh
@@ -98,7 +104,7 @@ podsplit INPUT [-d LENGTH] [-o FOLDER]
 | --- | --- | --- |
 | `INPUT` | Local audio file or HTTP(S) URL | Required |
 | `-d`, `--duration` | Length of each chunk | `10m` |
-| `-o`, `--output` | Folder for the MP3 files; created if needed | `<input-name>_chunks` |
+| `-o`, `--output` | Folder for the MP3 files; created if needed | `<input-name>_chunks`, or `<title>_chunks` when yt-dlp is used |
 | `-h`, `--help` | Show command help | — |
 
 Lengths can be given in seconds or with a unit:

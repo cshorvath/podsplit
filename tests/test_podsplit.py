@@ -98,8 +98,7 @@ class SplitTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(list((self.root / "input audio_chunks").glob("*.mp3"))), 1)
 
-    def test_url_fallback_cleans_partial_chunks_and_download(self):
-        output = self.root / "fallback"
+    def test_url_fallback_uses_title_unless_output_is_custom(self):
         url = "https://example.com/watch?v=123"
         real_run = subprocess.run
         calls = []
@@ -107,7 +106,10 @@ class SplitTests(unittest.TestCase):
         def run(command, **kwargs):
             calls.append(command)
             if command[:3] == [sys.executable, "-m", "yt_dlp"]:
-                downloaded = Path(command[command.index("-o") + 1].replace("%(ext)s", "wav"))
+                template = command[command.index("-o") + 1]
+                self.assertIn("%(title|audio).150B", template)
+                self.assertIn("--windows-filenames", command)
+                downloaded = Path(template.replace("%(title|audio).150B", "An episode.with dots").replace("%(ext)s", "wav"))
                 shutil.copyfile(self.source, downloaded)
                 return subprocess.CompletedProcess(command, 0, stdout=str(downloaded) + "\n")
             if "-i" in command and command[command.index("-i") + 1] == url:
@@ -115,10 +117,21 @@ class SplitTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 1)
             return real_run(command, **kwargs)
 
-        with patch("podsplit.subprocess.run", side_effect=run), patch("podsplit.importlib.util.find_spec", return_value=object()):
-            split_audio(url, 1, output)
-        self.check_chunks(output)
-        self.assertEqual(len(list(output.iterdir())), 3)
+        for custom in (True, False):
+            with self.subTest(custom_output=custom):
+                output = self.root / ("custom" if custom else "An episode.with dots_chunks")
+                with patch("podsplit.subprocess.run", side_effect=run), patch("podsplit.importlib.util.find_spec", return_value=object()), patch("podsplit.Path.cwd", return_value=self.root):
+                    chunks = split_audio(url, 1, output if custom else None)
+                self.assertEqual(chunks[0].parent, output)
+                self.check_chunks(output)
+                self.assertEqual(len(list(output.iterdir())), 3)
+        # A second run using the same title must preserve the first run's files.
+        before = {p.name: p.read_bytes() for p in output.iterdir()}
+        with patch("podsplit.subprocess.run", side_effect=run), patch("podsplit.importlib.util.find_spec", return_value=object()), patch("podsplit.Path.cwd", return_value=self.root):
+            with self.assertRaisesRegex(ValueError, "already contains chunks"):
+                split_audio(url, 1)
+        self.assertEqual(before, {p.name: p.read_bytes() for p in output.iterdir()})
+        self.assertEqual({p.name for p in self.root.iterdir()}, {"input audio.wav", "custom", "An episode.with dots_chunks"})
         download_command = calls[1]
         self.assertIn("--no-playlist", download_command)
         self.assertEqual(download_command[-2:], ["--", url])

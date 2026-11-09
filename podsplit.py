@@ -34,7 +34,8 @@ def download_audio(source: str, directory: Path) -> Path:
     result = subprocess.run([
         *downloader, "--ignore-config", "--no-playlist", "--no-progress",
         "--no-simulate", "-f", "bestaudio/best",
-        "-o", str(directory / "download.%(ext)s"),
+        "--windows-filenames",
+        "-o", str(directory).replace("%", "%%") + "/%(title|audio).150B.%(ext)s",
         "--print", "after_move:filepath", "--", source,
     ], stdout=subprocess.PIPE, text=True, check=False)
     if result.returncode:
@@ -45,7 +46,7 @@ def download_audio(source: str, directory: Path) -> Path:
     return Path(paths[0])
 
 
-def split_audio(source: str, duration: float, output: Path) -> list[Path]:
+def split_audio(source: str, duration: float, output: Path | None = None) -> list[Path]:
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
         raise ValueError("FFmpeg is required; install it and ensure ffmpeg is on PATH")
@@ -62,10 +63,16 @@ def split_audio(source: str, duration: float, output: Path) -> list[Path]:
             raise ValueError(f"input file does not exist: {source}")
         input_source = str(input_path)
 
-    output = output.expanduser().resolve()
-    output.mkdir(parents=True, exist_ok=True)
-    if any(output.glob("chunk_*.mp3")):
-        raise ValueError(f"output folder already contains chunks: {output}; choose another folder")
+    custom_output = output is not None
+    if custom_output:
+        output = output.expanduser().resolve()
+        output.mkdir(parents=True, exist_ok=True)
+        if any(output.glob("chunk_*.mp3")):
+            raise ValueError(f"output folder already contains chunks: {output}; choose another folder")
+    else:
+        source_path = unquote(parsed.path) if is_url else source
+        stem = Path(source_path).stem or "audio"
+        output = Path.cwd() / f"{stem}_chunks"
 
     def encode(input_source: str, target: Path) -> int:
         command = [
@@ -81,7 +88,8 @@ def split_audio(source: str, duration: float, output: Path) -> list[Path]:
         return subprocess.run(command, check=False).returncode
 
     # Stage chunks so a failed direct URL attempt cannot mix with the retry.
-    with tempfile.TemporaryDirectory(prefix=".podsplit-", dir=output) as work:
+    staging_parent = output if custom_output else Path.cwd()
+    with tempfile.TemporaryDirectory(prefix=".podsplit-", dir=staging_parent) as work:
         directory = Path(work)
         result = encode(input_source, directory)
         if result and is_url:
@@ -89,12 +97,17 @@ def split_audio(source: str, duration: float, output: Path) -> list[Path]:
             for chunk in directory.glob("chunk_*.mp3"):
                 chunk.unlink()
             downloaded = download_audio(source, directory)
+            if not custom_output:
+                output = Path.cwd() / f"{downloaded.stem}_chunks"
             result = encode(str(downloaded), directory)
         if result:
             raise ValueError(f"FFmpeg failed (exit {result})")
         chunks = sorted(directory.glob("chunk_*.mp3"))
         if not chunks:
             raise ValueError("FFmpeg produced no audio chunks")
+        output.mkdir(parents=True, exist_ok=True)
+        if any(output.glob("chunk_*.mp3")):
+            raise ValueError(f"output folder already contains chunks: {output}; choose another folder")
         published = []
         for chunk in chunks:
             destination = output / chunk.name
@@ -111,13 +124,10 @@ def main(argv: list[str] | None = None) -> int:
         "-d", "--duration", type=duration_seconds, default=600.0,
         metavar="LENGTH", help="chunk length: seconds, 30s, 10m, 1h (default: 10m)",
     )
-    parser.add_argument("-o", "--output", type=Path, help="output folder (default: <input-name>_chunks)")
+    parser.add_argument("-o", "--output", type=Path, help="output folder (default: <input-name>_chunks, or <title>_chunks with yt-dlp)")
     args = parser.parse_args(argv)
-    source_path = unquote(urlsplit(args.input).path) if args.input.lower().startswith(("http://", "https://")) else args.input
-    stem = Path(source_path).stem or "audio"
-    output = args.output or Path(f"{stem}_chunks")
     try:
-        chunks = split_audio(args.input, args.duration, output)
+        chunks = split_audio(args.input, args.duration, args.output)
     except (ValueError, OSError) as exc:
         print(f"podsplit: {exc}", file=sys.stderr)
         return 1
