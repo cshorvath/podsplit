@@ -1,29 +1,168 @@
 # podsplit
 
-Split an audio file, direct HTTP(S) audio URL, or yt-dlp-supported webpage URL into numbered MP3 files.
-Requires Python 3.10+ and FFmpeg with the `libmp3lame` encoder on your PATH.
-On Debian/Ubuntu, install FFmpeg with `sudo apt install ffmpeg`.
+Turn a long recording into smaller MP3 files with one command.
+Give podsplit a local audio file or a link, and it creates **10-minute chunks**
+by default. You can choose a different length and output folder.
 
-Install the command on your PATH (includes yt-dlp):
+## Install
+
+You need **Python 3.10 or newer**, **FFmpeg**, and **pipx**.
+FFmpeg handles the audio conversion; pipx makes the `podsplit` command
+available from any folder.
+
+On Ubuntu or Debian, install the prerequisites:
+
+```sh
+sudo apt install python3 pipx ffmpeg
+```
+
+Then, from the folder containing this README, run:
 
 ```sh
 pipx install .
 pipx ensurepath
 ```
 
-Restart your terminal after `ensurepath`. To update an existing installation,
-run `pipx install --force .` from this directory.
-
-Run directly (local files and direct media URLs need no Python dependencies;
-webpage URLs require yt-dlp installed in the current Python or on PATH):
+Restart your terminal, then check that it works:
 
 ```sh
-python3 podsplit.py recording.m4a
-python3 podsplit.py recording.wav --duration 5m --output ./parts
-python3 podsplit.py 'https://example.com/episode.mp3' -d 600 -o ./episode
+podsplit --help
 ```
 
-Or install the command in a virtual environment:
+Installation includes [yt-dlp](https://github.com/yt-dlp/yt-dlp), which podsplit
+uses automatically for webpage links when FFmpeg cannot read them directly.
+
+## Split your first recording
+
+```sh
+podsplit recording.mp3
+```
+
+This creates a `recording_chunks` folder in your current directory:
+
+```text
+recording_chunks/
+  chunk_0001.mp3
+  chunk_0002.mp3
+  chunk_0003.mp3
+  ...
+```
+
+Each chunk is about 10 minutes long. The last chunk holds whatever remains,
+so a 25-minute recording produces two roughly 10-minute chunks and one
+roughly 5-minute chunk. Your original file stays unchanged.
+
+## Examples
+
+**Make 5-minute chunks:**
+
+```sh
+podsplit recording.m4a --duration 5m
+```
+
+**Choose where the chunks go:**
+
+```sh
+podsplit recording.wav -d 5m --output ./my-chunks
+```
+
+**Split audio from a direct link:**
+
+```sh
+podsplit 'https://example.com/episode.mp3' -o ./episode
+```
+
+**Use a video webpage link:**
+
+```sh
+podsplit 'https://www.youtube.com/watch?v=VIDEO_ID' -d 10m -o ./episode
+```
+
+Replace the example URL with your own. Webpage support depends on yt-dlp's
+ability to download that link. A video link containing a playlist downloads
+only that video; standalone playlists are not supported.
+
+**Use a filename containing spaces:**
+
+```sh
+podsplit 'My recording.mp3' -d 90s
+```
+
+## Options
+
+```text
+podsplit INPUT [-d LENGTH] [-o FOLDER]
+```
+
+| Option | What it does | Default |
+| --- | --- | --- |
+| `INPUT` | Local audio file or HTTP(S) URL | Required |
+| `-d`, `--duration` | Length of each chunk | `10m` |
+| `-o`, `--output` | Folder for the MP3 files; created if needed | `<input-name>_chunks` |
+| `-h`, `--help` | Show command help | — |
+
+Lengths can be given in seconds or with a unit:
+
+| Value | Chunk length |
+| --- | --- |
+| `600` | 10 minutes |
+| `90s` | 90 seconds |
+| `2.5m` | 2 minutes, 30 seconds |
+| `1h` | 1 hour |
+
+## What to expect
+
+- Output is always MP3, even when the input is another audio format.
+- Chunk lengths can vary slightly because MP3 audio is split at frame boundaries.
+- If the input has multiple audio tracks, podsplit uses the first one.
+- Existing `chunk_*.mp3` files are never overwritten. Choose a different output
+  folder to keep an earlier run.
+- Webpage downloads use temporary disk space for the downloaded media.
+  Temporary files are removed when processing finishes or fails.
+
+## Troubleshooting
+
+**`podsplit: command not found`**
+
+Run `pipx ensurepath`, then close and reopen your terminal.
+
+**FFmpeg is missing**
+
+Install FFmpeg and check that `ffmpeg -version` works in your terminal.
+Your FFmpeg installation must include the `libmp3lame` MP3 encoder.
+
+**The output folder already contains chunks**
+
+Choose a new folder with `-o ./another-folder`, or move the old chunks before
+trying again. If processing was interrupted while publishing files, some
+chunks may already be in the output folder.
+
+**A webpage link fails to download**
+
+Check that the link works and update yt-dlp:
+
+```sh
+pipx runpip podsplit install --upgrade yt-dlp
+```
+
+## Update podsplit
+
+From the project folder, reinstall the current code:
+
+```sh
+pipx install --force .
+```
+
+## Run without pipx
+
+You can run the script directly for local files and direct media URLs:
+
+```sh
+python3 podsplit.py recording.mp3 -d 5m
+```
+
+For webpage links, yt-dlp must be installed in the same Python environment
+or available as a `yt-dlp` command. To install everything in a virtual environment:
 
 ```sh
 python3 -m venv .venv
@@ -31,26 +170,9 @@ python3 -m venv .venv
 .venv/bin/podsplit recording.mp3
 ```
 
-`--duration` / `-d` accepts seconds (e.g. `600`) or a number followed by
-`s`, `m`, or `h` (e.g. `90s`, `2.5m`, `1h`). The default is 10 minutes.
-`--output` / `-o` defaults to `<input-name>_chunks` in the current directory.
+## Development
 
-Output files are `chunk_0001.mp3`, `chunk_0002.mp3`, and so on. Audio is
-re-encoded to variable-bitrate MP3 (FFmpeg quality 2), using the first audio
-track. Chunk boundaries follow MP3 frames, so lengths can differ slightly
-from the requested duration. The last chunk contains the remaining audio.
-FFmpeg tries URLs directly first. If that fails, podsplit uses
-[yt-dlp](https://github.com/yt-dlp/yt-dlp) to download the best available audio
-to a temporary folder, then splits it with FFmpeg. Video webpage links are
-supported wherever yt-dlp can extract them. A video link with a playlist
-downloads only the video; standalone playlists are not supported.
-Temporary downloads and staged chunks are cleaned up after processing.
-
-Existing `chunk_*.mp3` files cause the command to stop without overwriting
-them. If processing fails or is interrupted, partial chunks may remain;
-remove them or choose a new output directory before retrying.
-
-Run tests (requires FFmpeg and FFprobe):
+Run the tests with FFmpeg and FFprobe installed:
 
 ```sh
 python3 -m unittest discover -s tests -v
