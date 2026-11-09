@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "podsplit"
+version = "0.1.0"
+description = "Split local or HTTP audio into MP3 chunks"
+requires-python = ">=3.10"
+dependencies = ["yt-dlp"]
+
+[project.scripts]
+podsplit = "podsplit:main"
+
+[tool.setuptools]
+py-modules = ["podsplit"]
